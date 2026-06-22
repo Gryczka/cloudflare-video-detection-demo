@@ -4,6 +4,8 @@ Astro + Cloudflare Workers demo that captures device-camera frames, sends sample
 
 It ships as an **open, rate-limited public demo** — anyone can try it without signing in — and as a clean starter you can deploy yourself, where none of the demo limits apply.
 
+![Live video object detection on Cloudflare Workers AI](docs/screenshots/demo.png)
+
 - **Live demo:** https://video-detection.cloudflare.app/
 - **Source:** https://github.com/Gryczka/cloudflare-video-detection-demo
 
