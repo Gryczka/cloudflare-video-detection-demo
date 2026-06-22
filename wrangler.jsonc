@@ -4,7 +4,9 @@
 		"nodejs_compat",
 		"global_fetch_strictly_public"
 	],
-	"name": "cloudflare-video-detection-demo",
+	// Worker name drives the public hostnames:
+	//   video-detection.<account-subdomain>.workers.dev  and  video-detection.cloudflare.app
+	"name": "video-detection",
 	// Custom Worker entrypoint (Astro 6 / @astrojs/cloudflare v13).
 	// Wraps the Astro `handle()` fetch handler and adds a `scheduled()` cron
 	// handler plus the BudgetCounter Durable Object. See src/worker.ts.
