@@ -1,0 +1,102 @@
+<section id="architecture" class="architecture-wrap container scroll-reveal" aria-labelledby="architecture-diagram-title">
+	<div class="diagram-card corner-card">
+		<span class="corner-top-right"></span>
+		<span class="corner-bottom-left"></span>
+
+		<div class="diagram-heading">
+			<div>
+				<p class="eyebrow">Reference architecture</p>
+				<h2 id="architecture-diagram-title">Generated Cloudflare Developer Platform architecture</h2>
+			</div>
+			<p class="diagram-note">Workers Warm style · generated from an architecture brief</p>
+		</div>
+
+		<div class="diagram-stage">
+			<img
+				src="/workers-ai-video-detection-demo-architecture.svg"
+				alt="Architecture diagram showing browser camera frames passing through Cloudflare Access to an Astro Worker and Workers AI models, then returning detection JSON and event logs."
+			/>
+		</div>
+	</div>
+</section>
+
+<style>
+	.architecture-wrap {
+		padding-block: 28px 24px;
+	}
+
+	.diagram-card {
+		padding: 18px;
+		background: var(--cf-bg-200);
+		border: 1px solid var(--cf-border);
+		border-radius: var(--radius-xl);
+		box-shadow: var(--shadow-stack);
+		animation: fade-slide-up 650ms var(--ease-entrance) 120ms both;
+	}
+
+	.diagram-heading {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		padding: 6px 6px 18px;
+		border-bottom: 1px solid var(--cf-border-light);
+	}
+
+	.eyebrow {
+		margin: 0 0 6px;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		letter-spacing: 0.05em;
+		color: var(--cf-orange);
+		text-transform: uppercase;
+	}
+
+	h2 {
+		max-width: 680px;
+		margin: 0;
+		font-size: clamp(1.75rem, 4vw, 2.6rem);
+		font-weight: 500;
+		line-height: 1;
+		letter-spacing: -0.04em;
+		text-wrap: balance;
+	}
+
+	.diagram-note {
+		margin: 0;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--cf-text-muted);
+	}
+
+	.diagram-stage {
+		overflow-x: auto;
+		padding-top: 18px;
+	}
+
+	.diagram-stage img {
+		display: block;
+		width: 100%;
+		min-width: 760px;
+		height: auto;
+		border: 1px solid var(--cf-border);
+		border-radius: var(--radius-xl);
+		box-shadow: var(--shadow-card);
+	}
+
+	@media (min-width: 860px) {
+		.diagram-card {
+			padding: 24px;
+		}
+
+		.diagram-heading {
+			flex-direction: row;
+			align-items: flex-start;
+			justify-content: space-between;
+		}
+
+		.diagram-note {
+			padding-top: 8px;
+			text-align: right;
+		}
+	}
+</style>

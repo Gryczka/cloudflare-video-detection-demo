@@ -1,0 +1,851 @@
+<section id="demo" class="demo-section container scroll-reveal" aria-labelledby="demo-title">
+	<div class="demo-card corner-card" data-video-demo>
+		<span class="corner-top-right"></span>
+		<span class="corner-bottom-left"></span>
+
+		<div class="demo-header">
+			<div>
+				<p class="eyebrow">Device camera to Workers AI</p>
+				<h2 id="demo-title">Live video object detection</h2>
+			</div>
+			<div class="status-badge" data-status-badge aria-live="polite">
+				<span class="status-dot" aria-hidden="true"></span>
+				<span data-status-text>Idle</span>
+			</div>
+		</div>
+
+		<div class="demo-grid">
+			<div class="video-panel">
+				<div class="video-stage" data-video-stage>
+					<video id="camera-video" muted playsinline></video>
+					<canvas id="overlay-canvas" aria-hidden="true"></canvas>
+					<div class="empty-state" data-empty-state>
+						<div class="camera-icon" aria-hidden="true">
+							<svg viewBox="0 0 24 24">
+								<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h7A2.5 2.5 0 0 1 16 6.5V8l3.72-2.13A1.5 1.5 0 0 1 22 7.17v9.66a1.5 1.5 0 0 1-2.28 1.3L16 16v1.5a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 4 17.5v-11Zm2.5-.5A.5.5 0 0 0 6 6.5v11a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5v-11a.5.5 0 0 0-.5-.5h-7Zm9.5 4.3v3.4l4 2.29V8.01l-4 2.29Z"></path>
+							</svg>
+						</div>
+						<p>Start the camera to stream sampled frames to Workers AI.</p>
+						<span>Camera access stays in your browser. Only compressed frames are sent to the API.</span>
+					</div>
+				</div>
+
+				<canvas id="capture-buffer" width="640" height="360" hidden></canvas>
+
+				<div class="controls" aria-label="Demo controls">
+					<button class="control-button primary" type="button" data-start-button>Start camera</button>
+					<button class="control-button ghost" type="button" data-pause-button disabled>Pause stream</button>
+					<button class="control-button outline" type="button" data-switch-button disabled>Switch camera</button>
+				</div>
+
+				<div class="error-panel" data-error-panel hidden role="alert"></div>
+			</div>
+
+			<aside class="detections-panel" aria-labelledby="detections-title">
+				<div class="panel-heading">
+					<div>
+						<p class="eyebrow">Detection stream</p>
+						<h3 id="detections-title">Objects found</h3>
+					</div>
+					<span class="threshold">score >= 55%</span>
+				</div>
+				<ul class="detections-list" data-detections-list aria-live="polite">
+					<li class="placeholder">No detections yet.</li>
+				</ul>
+			</aside>
+		</div>
+
+		<div class="stats-grid" aria-label="Live metrics">
+			<div class="stat-card">
+				<span>Round trip</span>
+				<strong data-stat-latency>-</strong>
+			</div>
+			<div class="stat-card">
+				<span>Inference</span>
+				<strong data-stat-inference>-</strong>
+			</div>
+			<div class="stat-card">
+				<span>Sample rate</span>
+				<strong data-stat-fps>1.0 fps</strong>
+			</div>
+			<div class="stat-card">
+				<span>Frames sent</span>
+				<strong data-stat-frames>0</strong>
+			</div>
+			<div class="stat-card">
+				<span>Labels seen</span>
+				<strong data-stat-objects>0</strong>
+			</div>
+			<div class="stat-card">
+				<span>Payload</span>
+				<strong data-stat-bytes>-</strong>
+			</div>
+		</div>
+	</div>
+</section>
+
+<script is:inline>
+	(() => {
+		const root = document.querySelector('[data-video-demo]');
+		if (!root) return;
+
+		const sampleMs = 1000;
+		const minScore = 0.55;
+		const captureWidth = 640;
+		const captureHeight = 360;
+		const colors = ['#FF4801', '#0A95FF', '#EE0DDB', '#16A34A', '#9616FF', '#0D9488'];
+
+		const refs = {
+			video: root.querySelector('#camera-video'),
+			overlay: root.querySelector('#overlay-canvas'),
+			buffer: root.querySelector('#capture-buffer'),
+			stage: root.querySelector('[data-video-stage]'),
+			empty: root.querySelector('[data-empty-state]'),
+			statusText: root.querySelector('[data-status-text]'),
+			startButton: root.querySelector('[data-start-button]'),
+			pauseButton: root.querySelector('[data-pause-button]'),
+			switchButton: root.querySelector('[data-switch-button]'),
+			errorPanel: root.querySelector('[data-error-panel]'),
+			detectionsList: root.querySelector('[data-detections-list]'),
+			latency: root.querySelector('[data-stat-latency]'),
+			inference: root.querySelector('[data-stat-inference]'),
+			fps: root.querySelector('[data-stat-fps]'),
+			frames: root.querySelector('[data-stat-frames]'),
+			objects: root.querySelector('[data-stat-objects]'),
+			bytes: root.querySelector('[data-stat-bytes]'),
+		};
+
+		let stream = null;
+		let intervalId = null;
+		let inFlight = null;
+		let facingMode = 'environment';
+		let frameCount = 0;
+		let seenLabels = new Set();
+		let currentDetections = [];
+
+		const overlayContext = refs.overlay.getContext('2d');
+		const bufferContext = refs.buffer.getContext('2d', { willReadFrequently: false });
+
+		function setStatus(text, state) {
+			refs.statusText.textContent = text;
+			root.dataset.status = state;
+		}
+
+		function setError(message) {
+			refs.errorPanel.hidden = false;
+			refs.errorPanel.textContent = message;
+			setStatus('Error', 'error');
+		}
+
+		function clearError() {
+			refs.errorPanel.hidden = true;
+			refs.errorPanel.textContent = '';
+			refs.errorPanel.classList.remove('is-demo-limit');
+		}
+
+		function showDemoLimit(body) {
+			const url = body && body.selfHostUrl;
+			const msg = (body && body.error) || 'Open demo limit reached.';
+			refs.errorPanel.hidden = false;
+			refs.errorPanel.classList.add('is-demo-limit');
+			refs.errorPanel.innerHTML =
+				escapeHtml(msg) +
+				(url ? ` <a href="${escapeHtml(url)}" target="_blank" rel="noopener">Run your own →</a>` : '');
+			setStatus('Demo limit', 'idle');
+		}
+
+		function sizeCanvases() {
+			const rect = refs.stage.getBoundingClientRect();
+			const overlayWidth = Math.max(1, Math.round(rect.width));
+			const overlayHeight = Math.max(1, Math.round(rect.height));
+			const overlayChanged = refs.overlay.width !== overlayWidth || refs.overlay.height !== overlayHeight;
+			const bufferChanged = refs.buffer.width !== captureWidth || refs.buffer.height !== captureHeight;
+
+			if (overlayChanged) {
+				refs.overlay.width = overlayWidth;
+				refs.overlay.height = overlayHeight;
+			}
+			if (bufferChanged) {
+				refs.buffer.width = captureWidth;
+				refs.buffer.height = captureHeight;
+			}
+			if (overlayChanged && currentDetections.length > 0) {
+				renderDetections(currentDetections);
+			}
+		}
+
+		function startPolling() {
+			if (intervalId) return;
+			captureAndDetect();
+			intervalId = window.setInterval(captureAndDetect, sampleMs);
+		}
+
+		function stopPolling() {
+			if (intervalId) {
+				window.clearInterval(intervalId);
+				intervalId = null;
+			}
+			if (inFlight) {
+				inFlight.abort();
+				inFlight = null;
+			}
+		}
+
+		async function startCamera() {
+			clearError();
+			if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+				setError('This browser does not expose getUserMedia. Try a current desktop or mobile browser.');
+				return;
+			}
+
+			if (!window.isSecureContext && location.hostname !== 'localhost') {
+				setError('Camera capture requires HTTPS. Deploy to workers.dev or run on localhost.');
+				return;
+			}
+
+			setStatus('Requesting camera', 'pending');
+			refs.startButton.disabled = true;
+
+			try {
+				stream = await navigator.mediaDevices.getUserMedia({
+					audio: false,
+					video: {
+						facingMode,
+						width: { ideal: 1280 },
+						height: { ideal: 720 },
+					},
+				});
+
+				refs.video.srcObject = stream;
+				await refs.video.play();
+				sizeCanvases();
+				refs.empty.hidden = true;
+				refs.pauseButton.disabled = false;
+				refs.switchButton.disabled = false;
+				setStatus('Streaming frames', 'streaming');
+				startPolling();
+			} catch (error) {
+				refs.startButton.disabled = false;
+				if (error && error.name === 'NotAllowedError') {
+					setError('Camera permission was denied. Allow camera access and try again.');
+					return;
+				}
+				setError('Could not start the camera on this device.');
+			}
+		}
+
+		function stopCamera() {
+			stopPolling();
+			if (stream) {
+				for (const track of stream.getTracks()) track.stop();
+				stream = null;
+			}
+			refs.video.srcObject = null;
+			currentDetections = [];
+			overlayContext.clearRect(0, 0, refs.overlay.width, refs.overlay.height);
+			refs.empty.hidden = false;
+			refs.startButton.disabled = false;
+			refs.pauseButton.disabled = true;
+			refs.switchButton.disabled = true;
+			setStatus('Paused', 'idle');
+		}
+
+		async function switchCamera() {
+			facingMode = facingMode === 'environment' ? 'user' : 'environment';
+			stopCamera();
+			await startCamera();
+		}
+
+		async function captureAndDetect() {
+			if (!stream || inFlight || refs.video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+
+			sizeCanvases();
+			bufferContext.drawImage(refs.video, 0, 0, captureWidth, captureHeight);
+			const blob = await new Promise((resolve) => refs.buffer.toBlob(resolve, 'image/jpeg', 0.7));
+
+			if (!blob) return;
+
+			const controller = new AbortController();
+			inFlight = controller;
+			setStatus('Detecting', 'detecting');
+			const started = performance.now();
+
+			try {
+				const response = await fetch('/api/detect', {
+					method: 'POST',
+					body: blob,
+					headers: { 'content-type': 'image/jpeg' },
+					signal: controller.signal,
+				});
+
+				if (!response.ok) {
+					const body = await response.json().catch(() => ({}));
+					if (body && body.demoLimit) {
+						showDemoLimit(body);
+						if (body.reason === 'demo_daily_cap') stopPolling();
+						return;
+					}
+					throw new Error(body.error || `Detection failed with ${response.status}`);
+				}
+
+				const payload = await response.json();
+				const totalMs = performance.now() - started;
+				const detections = Array.isArray(payload.detections) ? payload.detections : [];
+				frameCount += 1;
+				drawDetections(detections);
+				updateStats(totalMs, payload.inferenceMs, payload.bytes, detections);
+				setStatus('Streaming frames', 'streaming');
+			} catch (error) {
+				if (error && error.name === 'AbortError') return;
+				setError(error && error.message ? error.message : 'Detection request failed.');
+				stopPolling();
+			} finally {
+				if (inFlight === controller) inFlight = null;
+			}
+		}
+
+		function updateStats(totalMs, inferenceMs, bytes, detections) {
+			refs.latency.textContent = `${Math.round(totalMs)} ms`;
+			refs.inference.textContent = Number.isFinite(inferenceMs) ? `${Math.round(inferenceMs)} ms` : '-';
+			refs.fps.textContent = `${(1000 / sampleMs).toFixed(1)} fps`;
+			refs.frames.textContent = String(frameCount);
+			refs.bytes.textContent = Number.isFinite(bytes) ? `${Math.round(bytes / 1024)} KB` : '-';
+
+			for (const detection of detections) {
+				if (detection.score >= minScore) seenLabels.add(detection.label);
+			}
+			refs.objects.textContent = String(seenLabels.size);
+		}
+
+		function drawDetections(detections) {
+			const visible = detections
+				.map(normalizeDetection)
+				.filter(Boolean)
+				.filter((d) => d.score >= minScore)
+				.sort((a, b) => b.score - a.score)
+				.slice(0, 8);
+			currentDetections = visible;
+			renderDetections(visible);
+			renderDetectionsList(visible);
+		}
+
+		function renderDetections(visible) {
+			overlayContext.clearRect(0, 0, refs.overlay.width, refs.overlay.height);
+			const sx = refs.overlay.width / captureWidth;
+			const sy = refs.overlay.height / captureHeight;
+
+			for (const detection of visible) {
+				const color = colorFor(detection.label);
+				const x = detection.box.xmin * sx;
+				const y = detection.box.ymin * sy;
+				const width = (detection.box.xmax - detection.box.xmin) * sx;
+				const height = (detection.box.ymax - detection.box.ymin) * sy;
+
+				overlayContext.strokeStyle = color;
+				overlayContext.lineWidth = 2;
+				overlayContext.strokeRect(x, y, width, height);
+
+				const text = `${detection.label} ${Math.round(detection.score * 100)}%`;
+				overlayContext.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+				const textWidth = overlayContext.measureText(text).width;
+				const labelY = Math.max(0, y - 22);
+				overlayContext.fillStyle = color;
+				roundedRect(overlayContext, x, labelY, textWidth + 12, 20, 5);
+				overlayContext.fill();
+				overlayContext.fillStyle = '#FFFBF5';
+				overlayContext.fillText(text, x + 6, labelY + 14);
+			}
+		}
+
+		function normalizeDetection(raw) {
+			if (!raw || typeof raw !== 'object') return null;
+			const label = String(raw.label || raw.class || raw.name || 'object');
+			const score = Number(raw.score ?? raw.confidence ?? raw.probability ?? 0);
+			const box = raw.box || raw.bbox || raw.bounding_box || raw;
+			let xmin;
+			let ymin;
+			let xmax;
+			let ymax;
+
+			if (Array.isArray(box)) {
+				[xmin, ymin, xmax, ymax] = box.map(Number);
+			} else {
+				xmin = Number(box.xmin ?? box.x_min ?? box.left ?? box.x ?? 0);
+				ymin = Number(box.ymin ?? box.y_min ?? box.top ?? box.y ?? 0);
+				xmax = Number(box.xmax ?? box.x_max ?? box.right ?? 0);
+				ymax = Number(box.ymax ?? box.y_max ?? box.bottom ?? 0);
+			}
+
+			if (![xmin, ymin, xmax, ymax, score].every(Number.isFinite)) return null;
+
+			const isNormalized = Math.max(xmin, ymin, xmax, ymax) <= 1.5;
+			if (isNormalized) {
+				xmin *= captureWidth;
+				xmax *= captureWidth;
+				ymin *= captureHeight;
+				ymax *= captureHeight;
+			}
+
+			return {
+				label,
+				score,
+				box: {
+					xmin: clamp(xmin, 0, captureWidth),
+					ymin: clamp(ymin, 0, captureHeight),
+					xmax: clamp(xmax, 0, captureWidth),
+					ymax: clamp(ymax, 0, captureHeight),
+				},
+			};
+		}
+
+		function renderDetectionsList(detections) {
+			if (detections.length === 0) {
+				refs.detectionsList.innerHTML = '<li class="placeholder">No objects above threshold.</li>';
+				return;
+			}
+
+			refs.detectionsList.innerHTML = detections
+				.map((d) => {
+					const score = Math.round(d.score * 100);
+					const color = colorFor(d.label);
+					return `<li><span class="label"><i style="background:${color}"></i>${escapeHtml(d.label)}</span><span class="score">${score}%</span></li>`;
+				})
+				.join('');
+		}
+
+		function colorFor(label) {
+			let hash = 0;
+			for (let i = 0; i < label.length; i += 1) hash = (hash + label.charCodeAt(i) * (i + 1)) % 997;
+			return colors[hash % colors.length];
+		}
+
+		function clamp(value, min, max) {
+			return Math.min(Math.max(value, min), max);
+		}
+
+		function escapeHtml(value) {
+			return String(value).replace(/[&<>"]/g, (char) => {
+				const entities = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
+				return entities[char];
+			});
+		}
+
+		function roundedRect(ctx, x, y, width, height, radius) {
+			ctx.beginPath();
+			ctx.moveTo(x + radius, y);
+			ctx.lineTo(x + width - radius, y);
+			ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+			ctx.lineTo(x + width, y + height - radius);
+			ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+			ctx.lineTo(x + radius, y + height);
+			ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+			ctx.lineTo(x, y + radius);
+			ctx.quadraticCurveTo(x, y, x + radius, y);
+			ctx.closePath();
+		}
+
+		const resizeObserver = new ResizeObserver(sizeCanvases);
+		resizeObserver.observe(refs.stage);
+
+		refs.startButton.addEventListener('click', startCamera);
+		refs.pauseButton.addEventListener('click', stopCamera);
+		refs.switchButton.addEventListener('click', switchCamera);
+
+		document.addEventListener('visibilitychange', () => {
+			if (document.hidden) stopPolling();
+			else if (stream) startPolling();
+		});
+
+		window.addEventListener('beforeunload', stopCamera);
+	})();
+</script>
+
+<style>
+	.demo-section {
+		padding-block: 28px 42px;
+	}
+
+	.demo-card {
+		padding: 18px;
+		background: var(--cf-bg-200);
+		border: 1px solid var(--cf-border);
+		border-radius: var(--radius-xl);
+		box-shadow: var(--shadow-stack);
+		animation: fade-slide-up 650ms var(--ease-entrance) 120ms both;
+	}
+
+	.demo-header,
+	.demo-grid,
+	.stats-grid {
+		position: relative;
+		z-index: 1;
+	}
+
+	.demo-header {
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+		padding: 6px 6px 18px;
+		border-bottom: 1px solid var(--cf-border-light);
+	}
+
+	.eyebrow {
+		margin: 0 0 6px;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		letter-spacing: 0.05em;
+		color: var(--cf-orange);
+		text-transform: uppercase;
+	}
+
+	h2,
+	h3 {
+		margin: 0;
+		font-weight: 500;
+		letter-spacing: -0.035em;
+	}
+
+	h2 {
+		font-size: clamp(1.75rem, 4vw, 2.5rem);
+		line-height: 1;
+	}
+
+	h3 {
+		font-size: 20px;
+	}
+
+	.status-badge {
+		display: inline-flex;
+		align-items: center;
+		align-self: flex-start;
+		gap: 8px;
+		padding: 8px 12px;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--cf-text);
+		background: var(--cf-bg-300);
+		border: 1px solid var(--cf-border);
+		border-radius: var(--radius-full);
+	}
+
+	.status-dot {
+		width: 8px;
+		height: 8px;
+		background: var(--cf-text-subtle);
+		border-radius: 999px;
+	}
+
+	.demo-card[data-status='pending'] .status-dot,
+	.demo-card[data-status='detecting'] .status-dot {
+		background: var(--cf-warning);
+		animation: pulse-soft 1s ease-in-out infinite;
+	}
+
+	.demo-card[data-status='streaming'] .status-dot {
+		background: var(--cf-success);
+	}
+
+	.demo-card[data-status='error'] .status-dot {
+		background: var(--cf-error);
+	}
+
+	.demo-grid {
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: 18px;
+		padding-block: 20px;
+	}
+
+	.video-panel {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		gap: 14px;
+	}
+
+	.video-stage {
+		position: relative;
+		min-height: 260px;
+		aspect-ratio: 16 / 9;
+		overflow: hidden;
+		background:
+			linear-gradient(135deg, rgba(82, 16, 0, 0.08), transparent),
+			#1a1209;
+		border: 1px solid var(--cf-border);
+		border-radius: var(--radius-xl);
+	}
+
+	#camera-video,
+	#overlay-canvas,
+	.empty-state {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+	}
+
+	#camera-video {
+		object-fit: fill;
+	}
+
+	#overlay-canvas {
+		pointer-events: none;
+	}
+
+	.empty-state {
+		display: grid;
+		place-items: center;
+		padding: 24px;
+		color: #fffbf5;
+		text-align: center;
+		background-image: radial-gradient(circle, rgba(255, 251, 245, 0.16) 0.75px, transparent 0.75px);
+		background-size: 12px 12px;
+	}
+
+	.empty-state[hidden] {
+		display: none;
+	}
+
+	.empty-state p {
+		max-width: 420px;
+		margin: 14px 0 6px;
+		font-size: clamp(1.1rem, 3vw, 1.6rem);
+		line-height: 1.1;
+		letter-spacing: -0.035em;
+	}
+
+	.empty-state span {
+		max-width: 400px;
+		font-size: 14px;
+		line-height: 1.5;
+		color: rgba(255, 251, 245, 0.7);
+	}
+
+	.camera-icon {
+		display: grid;
+		width: 58px;
+		height: 58px;
+		place-items: center;
+		color: var(--cf-orange);
+		background: rgba(255, 72, 1, 0.12);
+		border: 1px solid rgba(255, 72, 1, 0.32);
+		border-radius: var(--radius-xl);
+	}
+
+	.camera-icon svg {
+		width: 28px;
+		height: 28px;
+		fill: currentColor;
+	}
+
+	.controls {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 10px;
+	}
+
+	.control-button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 44px;
+		padding: 11px 18px;
+		font-size: 14px;
+		font-weight: 500;
+		border: 1px solid transparent;
+		border-radius: var(--radius-full);
+	}
+
+	.control-button.primary {
+		color: var(--cf-bg-100);
+		background: var(--cf-orange);
+	}
+
+	.control-button.primary:hover {
+		opacity: 0.95;
+		border-color: color-mix(in srgb, var(--cf-bg-100) 50%, transparent);
+		border-style: dashed;
+	}
+
+	.control-button.ghost {
+		color: var(--cf-orange);
+		background: transparent;
+		border-color: var(--cf-border);
+	}
+
+	.control-button.outline {
+		color: var(--cf-text);
+		background: var(--cf-bg-200);
+		border-color: var(--cf-border);
+	}
+
+	.control-button.ghost:hover,
+	.control-button.outline:hover {
+		background: var(--cf-bg-300);
+		border-color: var(--cf-orange);
+		border-style: dashed;
+	}
+
+	.error-panel {
+		padding: 12px 14px;
+		font-size: 14px;
+		line-height: 1.45;
+		color: var(--cf-error);
+		background: color-mix(in srgb, var(--cf-error) 9%, var(--cf-bg-200));
+		border: 1px solid color-mix(in srgb, var(--cf-error) 36%, transparent);
+		border-radius: var(--radius-lg);
+	}
+
+	.error-panel.is-demo-limit {
+		color: var(--cf-text);
+		background: var(--cf-orange-light);
+		border-color: color-mix(in srgb, var(--cf-orange) 36%, transparent);
+	}
+
+	.error-panel.is-demo-limit a {
+		color: var(--cf-orange);
+		font-weight: 600;
+	}
+
+	.detections-panel {
+		min-width: 0;
+		padding: 18px;
+		background: var(--cf-bg-100);
+		border: 1px dashed var(--cf-border);
+		border-radius: var(--radius-xl);
+	}
+
+	.panel-heading {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 14px;
+		padding-bottom: 16px;
+		border-bottom: 1px solid var(--cf-border-light);
+	}
+
+	.threshold {
+		flex: 0 0 auto;
+		padding: 5px 8px;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--cf-orange);
+		background: var(--cf-orange-light);
+		border-radius: var(--radius-full);
+	}
+
+	.detections-list {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		min-height: 210px;
+		margin: 16px 0 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	:global(.detections-list li) {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 10px 12px;
+		font-size: 14px;
+		background: var(--cf-bg-200);
+		border: 1px solid var(--cf-border-light);
+		border-radius: var(--radius-lg);
+	}
+
+	:global(.detections-list .placeholder) {
+		justify-content: center;
+		min-height: 128px;
+		color: var(--cf-text-muted);
+		text-align: center;
+		background: transparent;
+		border-style: dashed;
+	}
+
+	:global(.detections-list .label) {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		min-width: 0;
+	}
+
+	:global(.detections-list .label i) {
+		width: 8px;
+		height: 8px;
+		border-radius: 99px;
+	}
+
+	:global(.detections-list .score) {
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--cf-text-muted);
+	}
+
+	.stats-grid {
+		display: grid;
+		grid-template-columns: repeat(2, 1fr);
+		gap: 10px;
+		padding-top: 18px;
+		border-top: 1px solid var(--cf-border-light);
+	}
+
+	.stat-card {
+		padding: 14px;
+		background: var(--cf-bg-100);
+		border: 1px solid var(--cf-border);
+		border-radius: var(--radius-lg);
+	}
+
+	.stat-card span {
+		display: block;
+		margin-bottom: 8px;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		letter-spacing: 0.05em;
+		color: var(--cf-text-muted);
+		text-transform: uppercase;
+	}
+
+	.stat-card strong {
+		display: block;
+		font-size: 24px;
+		font-weight: 500;
+		line-height: 1;
+		color: var(--cf-orange);
+		letter-spacing: -0.035em;
+	}
+
+	@media (min-width: 720px) {
+		.demo-card {
+			padding: 24px;
+		}
+
+		.demo-header {
+			flex-direction: row;
+			align-items: center;
+			justify-content: space-between;
+		}
+
+		.status-badge {
+			align-self: center;
+		}
+
+		.stats-grid {
+			grid-template-columns: repeat(3, 1fr);
+		}
+	}
+
+	@media (min-width: 1024px) {
+		.demo-grid {
+			grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.45fr);
+			gap: 22px;
+		}
+
+		.stats-grid {
+			grid-template-columns: repeat(6, 1fr);
+		}
+	}
+</style>

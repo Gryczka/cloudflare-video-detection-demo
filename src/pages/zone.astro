@@ -1,0 +1,45 @@
+---
+import DemoNotice from '../components/DemoNotice.astro';
+import Footer from '../components/Footer.astro';
+import Header from '../components/Header.astro';
+import Hero from '../components/Hero.astro';
+import HowItWorks from '../components/HowItWorks.astro';
+import ZoneMonitorDemo from '../components/ZoneMonitorDemo.astro';
+import Layout from '../layouts/Layout.astro';
+
+const steps = [
+	{
+		accent: 'compute',
+		title: 'Draw a zone',
+		body: 'Create a normalized rectangle on the video overlay. The region survives resize and reloads.',
+	},
+	{
+		accent: 'ai',
+		title: 'Detect people',
+		body: 'DETR runs on sampled frames and returns person bounding boxes with confidence scores.',
+	},
+	{
+		accent: 'sase',
+		title: 'Log transitions',
+		body: 'The browser logs entry, exit, and clear events when people cross the virtual perimeter.',
+	},
+] as const;
+---
+
+<Layout>
+	<Header />
+	<main>
+		<DemoNotice />
+		<Hero
+			kicker="Computer vision for virtual perimeters"
+			title="Monitor people entering a custom zone"
+			subtitle="Draw a square directly on the camera feed, detect people with Workers AI, and log entry or exit events when detections overlap that area."
+			model="DETR + browser geometry"
+			meta="in-memory event log"
+			cta={{ label: 'Open the zone monitor', href: '#demo' }}
+		/>
+		<ZoneMonitorDemo />
+		<HowItWorks title="From detection to events" subtitle="This view turns object detection boxes into zone occupancy analytics without adding any server-side state." steps={steps} />
+	</main>
+	<Footer />
+</Layout>

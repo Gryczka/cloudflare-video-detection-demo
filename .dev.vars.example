@@ -1,0 +1,8 @@
+# Local development secrets for the video-detection demo.
+# Copy to `.dev.vars` (gitignored) and fill in if you want to exercise the
+# scheduled usage-report email locally. Not needed for the camera/detection demo.
+
+# API token with "Account Analytics: Read" — used by the scheduled() handler to
+# query the Analytics Engine SQL API for the monthly/daily usage reports.
+# In production, set this with: npx wrangler secret put AE_SQL_API_TOKEN
+AE_SQL_API_TOKEN=

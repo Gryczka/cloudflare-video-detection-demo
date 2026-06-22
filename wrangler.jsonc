@@ -1,13 +1,110 @@
 {
 	"compatibility_date": "2026-05-27",
-	"compatibility_flags": ["global_fetch_strictly_public"],
+	"compatibility_flags": [
+		"nodejs_compat",
+		"global_fetch_strictly_public"
+	],
 	"name": "cloudflare-video-detection-demo",
-	"main": "@astrojs/cloudflare/entrypoints/server",
+	// Custom Worker entrypoint (Astro 6 / @astrojs/cloudflare v13).
+	// Wraps the Astro `handle()` fetch handler and adds a `scheduled()` cron
+	// handler plus the BudgetCounter Durable Object. See src/worker.ts.
+	"main": "./src/worker.ts",
 	"assets": {
 		"directory": "./dist",
 		"binding": "ASSETS"
 	},
+	"ai": {
+		"binding": "AI",
+		"remote": true
+	},
 	"observability": {
 		"enabled": true
+	},
+
+	// --- Open public demo hardening (see src/lib/demo-limits.ts) ---
+
+	// Per-session rate limits. The `limit()` calls are keyed on a per-browser
+	// session id, NOT IP. Periods must be 10 or 60 seconds. Two separate
+	// namespaces so the cheap detector and the expensive vision model have
+	// independent budgets. These are demo guardrails only and are bypassed
+	// entirely when PUBLIC_DEMO_MODE !== "true".
+	"ratelimits": [
+		{
+			"name": "RL_DETECT",
+			"namespace_id": "2001",
+			"simple": { "limit": 90, "period": 60 }
+		},
+		{
+			"name": "RL_PPE",
+			"namespace_id": "2002",
+			"simple": { "limit": 6, "period": 60 }
+		}
+	],
+
+	// Global usage analytics — one data point per inference (endpoint, country,
+	// colo, city, model, outcome, latency, bytes). Powers the monthly/daily
+	// email reports via the Analytics Engine SQL API.
+	"analytics_engine_datasets": [
+		{
+			"binding": "ANALYTICS",
+			"dataset": "video_detection_usage"
+		}
+	],
+
+	// Global, strongly-consistent daily budget cap. A single BudgetCounter
+	// instance ("global") atomically counts inferences per UTC day and hard-stops
+	// spend once the per-endpoint cap is reached. This is the real runaway-cost
+	// protection (the rate-limit binding above is per-location and best-effort).
+	"durable_objects": {
+		"bindings": [
+			{ "name": "BUDGET", "class_name": "BudgetCounter" }
+		]
+	},
+	"migrations": [
+		{ "tag": "v1", "new_sqlite_classes": ["BudgetCounter"] }
+	],
+
+	// Cloudflare Email Service binding for the usage reports. The send-from
+	// domain (gryczka.dev) must be onboarded once via:
+	//   npx wrangler email sending enable gryczka.dev
+	"send_email": [
+		{ "name": "EMAIL" }
+	],
+
+	// Cron triggers (UTC):
+	//   "0 14 1 * *" -> monthly usage summary (always sent; [ALERT] when over threshold)
+	//   "0 14 * * *" -> daily spike alert (only sent when the prior day breaches DAILY_SPIKE_THRESHOLD)
+	"triggers": {
+		"crons": ["0 14 1 * *", "0 14 * * *"]
+	},
+
+	"vars": {
+		// Master switch for the open public demo. "true" enforces rate limits +
+		// the daily budget cap and shows the disclosure banner. Set to "false"
+		// for a self-hosted / production deployment to remove ALL demo caps.
+		"PUBLIC_DEMO_MODE": "true",
+
+		// Hard global per-UTC-day inference ceilings (enforced by BudgetCounter).
+		"DEMO_DETECT_DAILY_CAP": "50000",
+		"DEMO_PPE_DAILY_CAP": "2000",
+
+		// Email reporting thresholds (total inferences).
+		"USAGE_ALERT_THRESHOLD": "250000",
+		"DAILY_SPIKE_THRESHOLD": "30000",
+
+		// Email routing for the usage reports.
+		"REPORT_EMAIL_TO": "pgryczka@cloudflare.com",
+		"REPORT_EMAIL_FROM": "usage-bot@gryczka.dev",
+
+		// Shown to users when a demo limit is hit ("clone and self-host").
+		"SELF_HOST_URL": "https://github.com/Gryczka/cloudflare-video-detection-demo",
+
+		// Account id used to build the Analytics Engine SQL API URL in scheduled().
+		"CF_ACCOUNT_ID": "2bbafcb44187c279aefca7e4afb00578"
 	}
+
+	// Secret (set out-of-band, NOT committed):
+	//   npx wrangler secret put AE_SQL_API_TOKEN
+	// An API token with "Account Analytics: Read" used by scheduled() to query
+	// the Analytics Engine SQL API for the email reports.
 }

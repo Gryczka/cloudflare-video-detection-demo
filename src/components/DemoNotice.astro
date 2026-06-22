@@ -1,0 +1,138 @@
+---
+import { DEMO_LIMITS, SELF_HOST_FALLBACK_URL } from '../lib/demo-limits';
+
+// Baked from the shared constants so the disclosed numbers always match what is
+// enforced. Visibility is confirmed at runtime via /api/demo-status (hidden when
+// PUBLIC_DEMO_MODE=false, i.e. a self-hosted / production deployment).
+const detectPerMin = DEMO_LIMITS.detect.perSessionPerMinute;
+const ppePerMin = DEMO_LIMITS.ppe.perSessionPerMinute;
+const detectDaily = DEMO_LIMITS.detect.dailyCap.toLocaleString('en-US');
+const ppeDaily = DEMO_LIMITS.ppe.dailyCap.toLocaleString('en-US');
+---
+
+<aside class="demo-notice container" data-demo-notice hidden role="note" aria-label="Open demo notice">
+	<div class="demo-notice-inner">
+		<span class="demo-notice-badge">Open public demo</span>
+		<p>
+			This instance is rate-limited to keep Workers AI costs bounded: about
+			<strong>{detectPerMin} detections/min per session</strong> (≈1&nbsp;fps), the PPE vision
+			model runs <strong>on demand</strong>, and global daily caps apply ({detectDaily} detections,
+			{ppeDaily} PPE checks). Any cutoff you see is just a demo guardrail —
+			<strong>none of these limits exist when you deploy it yourself.</strong>
+		</p>
+		<a class="demo-notice-link" data-self-host-link href={SELF_HOST_FALLBACK_URL} target="_blank" rel="noopener">Run your own →</a>
+		<button class="demo-notice-dismiss" type="button" data-demo-dismiss aria-label="Dismiss notice">×</button>
+	</div>
+</aside>
+
+<script is:inline>
+	(() => {
+		const el = document.querySelector('[data-demo-notice]');
+		if (!el) return;
+
+		// Shared, memoized fetch so other components (e.g. the PPE monitor) reuse it.
+		window.__demoStatus =
+			window.__demoStatus ||
+			fetch('/api/demo-status')
+				.then((r) => (r.ok ? r.json() : Promise.reject(new Error('status'))))
+				.catch(() => ({ demoMode: true, ppe: { manual: true } }));
+
+		const dismissed = sessionStorage.getItem('vdd-demo-notice-dismissed') === '1';
+
+		window.__demoStatus.then((status) => {
+			const link = el.querySelector('[data-self-host-link]');
+			if (link && status && status.selfHostUrl) link.setAttribute('href', status.selfHostUrl);
+			if (status && status.demoMode && !dismissed) {
+				el.hidden = false;
+			}
+		});
+
+		const dismiss = el.querySelector('[data-demo-dismiss]');
+		if (dismiss) {
+			dismiss.addEventListener('click', () => {
+				el.hidden = true;
+				try {
+					sessionStorage.setItem('vdd-demo-notice-dismissed', '1');
+				} catch {}
+			});
+		}
+	})();
+</script>
+
+<style>
+	.demo-notice {
+		margin-top: 16px;
+	}
+
+	.demo-notice[hidden] {
+		display: none;
+	}
+
+	.demo-notice-inner {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 10px 14px;
+		padding: 12px 16px;
+		font-size: 14px;
+		line-height: 1.45;
+		color: var(--cf-text);
+		background: var(--cf-orange-light);
+		border: 1px solid color-mix(in srgb, var(--cf-orange) 32%, transparent);
+		border-radius: var(--radius-lg);
+	}
+
+	.demo-notice-badge {
+		flex: 0 0 auto;
+		padding: 5px 10px;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: var(--cf-bg-100);
+		background: var(--cf-orange);
+		border-radius: var(--radius-full);
+	}
+
+	.demo-notice p {
+		flex: 1 1 320px;
+		margin: 0;
+		color: var(--cf-text-muted);
+	}
+
+	.demo-notice p strong {
+		color: var(--cf-text);
+		font-weight: 600;
+	}
+
+	.demo-notice-link {
+		flex: 0 0 auto;
+		font-family: var(--font-mono);
+		font-size: 13px;
+		color: var(--cf-orange);
+		text-decoration: none;
+		white-space: nowrap;
+	}
+
+	.demo-notice-link:hover {
+		text-decoration: underline;
+	}
+
+	.demo-notice-dismiss {
+		flex: 0 0 auto;
+		width: 28px;
+		height: 28px;
+		font-size: 18px;
+		line-height: 1;
+		color: var(--cf-text-muted);
+		background: transparent;
+		border: 1px solid var(--cf-border);
+		border-radius: var(--radius-full);
+		cursor: pointer;
+	}
+
+	.demo-notice-dismiss:hover {
+		color: var(--cf-text);
+		border-color: var(--cf-orange);
+	}
+</style>

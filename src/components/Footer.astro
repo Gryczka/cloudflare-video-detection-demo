@@ -1,0 +1,54 @@
+<footer class="site-footer">
+	<div class="container footer-inner">
+		<p>Built with Astro, Cloudflare Workers, and Workers AI.</p>
+		<nav aria-label="Footer links">
+			<a href="https://developers.cloudflare.com/workers-ai/">Workers AI</a>
+			<a href="https://docs.astro.build/en/guides/integrations-guide/cloudflare/">Astro adapter</a>
+			<a href="https://developers.cloudflare.com/workers-ai/models/detr-resnet-50/">DETR model</a>
+		</nav>
+	</div>
+</footer>
+
+<style>
+	.site-footer {
+		border-top: 1px solid var(--cf-border);
+		background: var(--cf-bg-200);
+	}
+
+	.footer-inner {
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+		padding-block: 26px;
+		font-size: 13px;
+		color: var(--cf-text-muted);
+	}
+
+	p {
+		margin: 0;
+	}
+
+	nav {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 14px;
+	}
+
+	a {
+		color: var(--cf-orange);
+		text-decoration: none;
+	}
+
+	a:hover {
+		text-decoration: underline;
+		text-underline-offset: 4px;
+	}
+
+	@media (min-width: 720px) {
+		.footer-inner {
+			flex-direction: row;
+			align-items: center;
+			justify-content: space-between;
+		}
+	}
+</style>

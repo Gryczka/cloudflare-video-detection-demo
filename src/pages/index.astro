@@ -1,11 +1,45 @@
 ---
-import Welcome from '../components/Welcome.astro';
+import DemoNotice from '../components/DemoNotice.astro';
+import Footer from '../components/Footer.astro';
+import Header from '../components/Header.astro';
+import Hero from '../components/Hero.astro';
+import HowItWorks from '../components/HowItWorks.astro';
+import VideoDemo from '../components/VideoDemo.astro';
 import Layout from '../layouts/Layout.astro';
 
-// Welcome to Astro! Wondering what to do next? Check out the Astro documentation at https://docs.astro.build
-// Don't want to use any of this? Delete everything in this file, the `assets`, `components`, and `layouts` directories, and start fresh.
+const steps = [
+	{
+		accent: 'compute',
+		title: 'Capture frames',
+		body: 'Camera frames are sampled in-browser, downscaled to JPEG, and sent over HTTPS at roughly 1 fps.',
+	},
+	{
+		accent: 'ai',
+		title: 'Run DETR',
+		body: "The Astro API route calls the Workers AI binding and runs Meta's DETR ResNet-50 object detector.",
+	},
+	{
+		accent: 'media',
+		title: 'Render detections',
+		body: 'The browser scales model coordinates back to the video overlay and draws labels with confidence scores.',
+	},
+] as const;
 ---
 
 <Layout>
-	<Welcome />
+	<Header />
+	<main>
+		<DemoNotice />
+		<Hero
+			kicker="Live object detection on Cloudflare Workers"
+			title="See the world through Workers AI"
+			subtitle="Stream camera frames from this device to Cloudflare, run DETR object detection on Workers AI, and render bounding boxes back over the live video feed."
+			model="@cf/facebook/detr-resnet-50"
+			meta="$0.0000075 per inference"
+			cta={{ label: 'Try the live detection', href: '#demo' }}
+		/>
+		<VideoDemo />
+		<HowItWorks steps={steps} />
+	</main>
+	<Footer />
 </Layout>

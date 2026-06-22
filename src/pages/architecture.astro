@@ -1,0 +1,191 @@
+---
+import ArchitectureDiagram from '../components/ArchitectureDiagram.astro';
+import FlowBreakdown from '../components/FlowBreakdown.astro';
+import Footer from '../components/Footer.astro';
+import Header from '../components/Header.astro';
+import Hero from '../components/Hero.astro';
+import HowItWorks from '../components/HowItWorks.astro';
+import Layout from '../layouts/Layout.astro';
+import { DEMO_LIMITS } from '../lib/demo-limits';
+
+const steps = [
+	{
+		accent: 'compute',
+		title: 'Push expensive work to Workers AI',
+		body: 'DETR and the selectable vision models run behind an AI binding while the browser keeps capture and overlay state lightweight.',
+	},
+	{
+		accent: 'ai',
+		title: 'Keep state in the browser',
+		body: 'Zones, event logs, model choices, and PPE assessment state are tab-local, so the demo avoids extra persistence services.',
+	},
+	{
+		accent: 'media',
+		title: 'Open, but cost-bounded',
+		body: 'The public demo runs without authentication. Instead of gating access, it bounds Workers AI spend with per-session rate limits and a global daily budget cap, and records usage in Analytics Engine. Cloudflare Access remains an optional way to run a private deployment.',
+	},
+] as const;
+
+const detectDaily = DEMO_LIMITS.detect.dailyCap.toLocaleString('en-US');
+const ppeDaily = DEMO_LIMITS.ppe.dailyCap.toLocaleString('en-US');
+---
+
+<Layout>
+	<Header />
+	<main>
+		<Hero
+			kicker="Reference architecture"
+			title="From camera to Workers AI and back"
+			subtitle="A static map of how this demo pushes frames to Cloudflare, runs DETR and vision models on Workers AI, and renders results back over the live video."
+			model="Astro · Workers · Workers AI · Rate limiting"
+			meta="open public demo · cost-bounded"
+			cta={{ label: 'See the architecture', href: '#architecture' }}
+		/>
+		<ArchitectureDiagram />
+
+		<section class="demo-limits container scroll-reveal" aria-labelledby="demo-limits-title">
+			<div class="section-heading">
+				<p class="eyebrow">Open demo guardrails</p>
+				<h2 id="demo-limits-title">Why you might see a rate-limit message</h2>
+			</div>
+			<p class="demo-limits-lede">
+				This is a public, unauthenticated demo, so it ships cost guardrails that keep Workers
+				AI spend bounded. <strong>None of these limits exist when you deploy the project
+				yourself</strong> — set <code>PUBLIC_DEMO_MODE=false</code> (and remove the caps) for a
+				production deployment.
+			</p>
+			<div class="demo-limits-grid">
+				<div class="limit-card">
+					<span>Per-session rate limit</span>
+					<strong>{DEMO_LIMITS.detect.perSessionPerMinute}/min</strong>
+					<small>object detection</small>
+				</div>
+				<div class="limit-card">
+					<span>Per-session rate limit</span>
+					<strong>{DEMO_LIMITS.ppe.perSessionPerMinute}/min</strong>
+					<small>PPE vision checks</small>
+				</div>
+				<div class="limit-card">
+					<span>Global daily cap</span>
+					<strong>{detectDaily}</strong>
+					<small>detections / day</small>
+				</div>
+				<div class="limit-card">
+					<span>Global daily cap</span>
+					<strong>{ppeDaily}</strong>
+					<small>PPE checks / day</small>
+				</div>
+			</div>
+			<p class="demo-limits-note">
+				The PPE vision model is the most expensive path, so in demo mode it runs on demand
+				(the "Analyze frame" button) rather than on a continuous loop. Per-session limits are
+				enforced with the Workers Rate Limiting binding; the global daily caps are enforced by a
+				Durable Object so spend is bounded across all visitors.
+			</p>
+		</section>
+
+		<FlowBreakdown />
+		<HowItWorks title="Why this shape?" subtitle="The same platform primitives support live detection, virtual perimeter monitoring, and PPE compliance with only route-level behavior changes." steps={steps} />
+	</main>
+	<Footer />
+</Layout>
+
+<style>
+	.demo-limits {
+		padding-block: 8px 28px;
+	}
+
+	.section-heading {
+		max-width: 720px;
+		margin-inline: auto;
+		text-align: center;
+	}
+
+	.eyebrow {
+		margin: 0 0 8px;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		letter-spacing: 0.05em;
+		color: var(--cf-orange);
+		text-transform: uppercase;
+	}
+
+	.demo-limits h2 {
+		margin: 0;
+		font-size: clamp(1.5rem, 3.5vw, 2.4rem);
+		font-weight: 500;
+		line-height: 1.05;
+		letter-spacing: -0.04em;
+		text-wrap: balance;
+	}
+
+	.demo-limits-lede,
+	.demo-limits-note {
+		max-width: 760px;
+		margin: 18px auto 0;
+		font-size: 15px;
+		line-height: 1.6;
+		color: var(--cf-text-muted);
+		text-align: center;
+	}
+
+	.demo-limits-lede strong {
+		color: var(--cf-text);
+	}
+
+	.demo-limits-lede code {
+		padding: 2px 6px;
+		font-family: var(--font-mono);
+		font-size: 13px;
+		color: var(--cf-orange);
+		background: var(--cf-orange-light);
+		border-radius: var(--radius-md);
+	}
+
+	.demo-limits-grid {
+		display: grid;
+		grid-template-columns: repeat(2, 1fr);
+		gap: 12px;
+		margin-top: 26px;
+	}
+
+	.limit-card {
+		padding: 16px;
+		text-align: center;
+		background: var(--cf-bg-200);
+		border: 1px solid var(--cf-border);
+		border-radius: var(--radius-lg);
+	}
+
+	.limit-card span {
+		display: block;
+		margin-bottom: 8px;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		letter-spacing: 0.05em;
+		color: var(--cf-text-muted);
+		text-transform: uppercase;
+	}
+
+	.limit-card strong {
+		display: block;
+		font-size: 26px;
+		font-weight: 500;
+		line-height: 1;
+		color: var(--cf-orange);
+		letter-spacing: -0.03em;
+	}
+
+	.limit-card small {
+		display: block;
+		margin-top: 6px;
+		font-size: 13px;
+		color: var(--cf-text-muted);
+	}
+
+	@media (min-width: 860px) {
+		.demo-limits-grid {
+			grid-template-columns: repeat(4, 1fr);
+		}
+	}
+</style>

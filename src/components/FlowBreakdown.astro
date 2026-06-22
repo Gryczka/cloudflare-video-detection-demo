@@ -1,0 +1,195 @@
+<section class="flow-breakdown container" aria-labelledby="flow-breakdown-title">
+	<div class="section-heading">
+		<p class="eyebrow">Route by route</p>
+		<h2 id="flow-breakdown-title">The same camera stream, three different products</h2>
+	</div>
+
+	<div class="flow-grid">
+		<article class="flow-card corner-card live-card scroll-reveal">
+			<span class="corner-top-right"></span>
+			<span class="corner-bottom-left"></span>
+			<div class="flow-top">
+				<span class="route-badge">/</span>
+				<h3>Live detection</h3>
+			</div>
+			<div class="flow-pills" aria-label="Live detection flow">
+				<span>camera</span><b>→</b><span>/api/detect</span><b>→</b><span>DETR</span><b>→</b><span>overlay</span>
+			</div>
+			<p>One DETR inference per sampled frame. Bounding boxes render directly over the live feed.</p>
+		</article>
+
+		<article class="flow-card corner-card zone-card scroll-reveal">
+			<span class="corner-top-right"></span>
+			<span class="corner-bottom-left"></span>
+			<div class="flow-top">
+				<span class="route-badge">/zone</span>
+				<h3>Zone monitor</h3>
+			</div>
+			<div class="flow-pills" aria-label="Zone monitor flow">
+				<span>camera</span><b>→</b><span>DETR</span><b>→</b><span>geometry</span><b>→</b><span>event log</span>
+			</div>
+			<p>Person boxes are intersected with a normalized zone. Entry and exit events stay in memory.</p>
+		</article>
+
+		<article class="flow-card corner-card ppe-card scroll-reveal">
+			<span class="corner-top-right"></span>
+			<span class="corner-bottom-left"></span>
+			<div class="flow-top">
+				<span class="route-badge">/ppe</span>
+				<h3>PPE monitor</h3>
+			</div>
+			<div class="flow-pills stacked" aria-label="PPE monitor flow">
+				<div><span>camera</span><b>→</b><span>/api/detect</span><b>→</b><span>DETR</span></div>
+				<div><span>camera</span><b>→</b><span>/api/ppe</span><b>→</b><span>vision LLM</span></div>
+			</div>
+			<p>Fast boxes stay responsive while a selectable vision model checks headwear on demand (or on a loop when self-hosted).</p>
+		</article>
+	</div>
+</section>
+
+<style>
+	.flow-breakdown {
+		padding-block: 26px 44px;
+	}
+
+	.section-heading {
+		max-width: 720px;
+		margin-inline: auto;
+		text-align: center;
+	}
+
+	.eyebrow {
+		margin: 0 0 8px;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		letter-spacing: 0.05em;
+		color: var(--cf-orange);
+		text-transform: uppercase;
+	}
+
+	h2 {
+		margin: 0;
+		font-size: clamp(1.75rem, 4vw, 3rem);
+		font-weight: 500;
+		line-height: 1;
+		letter-spacing: -0.04em;
+		text-wrap: balance;
+	}
+
+	.flow-grid {
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: 16px;
+		margin-top: 28px;
+	}
+
+	.flow-card {
+		padding: 22px;
+		background: var(--cf-bg-200);
+		border: 1px solid var(--cf-border);
+		border-radius: var(--radius-xl);
+		box-shadow: var(--shadow-card);
+		transition:
+			box-shadow var(--duration-normal) var(--ease-out),
+			transform var(--duration-normal) var(--ease-out),
+			border-color var(--duration-normal) var(--ease-out);
+	}
+
+	.flow-card:hover {
+		border-style: dashed;
+		box-shadow: var(--shadow-lg);
+		transform: translateY(-2px);
+	}
+
+	.live-card:hover {
+		border-color: var(--cf-orange);
+	}
+
+	.zone-card:hover {
+		border-color: var(--cf-compute);
+	}
+
+	.ppe-card:hover {
+		border-color: var(--cf-storage);
+	}
+
+	.flow-top {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-bottom: 18px;
+	}
+
+	.route-badge {
+		display: inline-flex;
+		align-items: center;
+		min-height: 32px;
+		padding: 6px 11px;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--cf-bg-100);
+		background: var(--cf-orange);
+		border-radius: var(--radius-full);
+	}
+
+	.zone-card .route-badge {
+		background: var(--cf-compute);
+	}
+
+	.ppe-card .route-badge {
+		background: var(--cf-storage);
+	}
+
+	h3 {
+		margin: 0;
+		font-size: 21px;
+		font-weight: 500;
+		letter-spacing: -0.03em;
+	}
+
+	.flow-pills,
+	.flow-pills div {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.flow-pills.stacked {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.flow-pills span {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 32px;
+		padding: 6px 10px;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--cf-text);
+		background: var(--cf-bg-100);
+		border: 1px solid var(--cf-border);
+		border-radius: var(--radius-full);
+	}
+
+	.flow-pills b {
+		font-family: var(--font-mono);
+		font-weight: 400;
+		color: var(--cf-text-muted);
+	}
+
+	p {
+		margin: 18px 0 0;
+		font-size: 15px;
+		line-height: 1.55;
+		color: var(--cf-text-muted);
+	}
+
+	@media (min-width: 960px) {
+		.flow-grid {
+			grid-template-columns: repeat(3, 1fr);
+		}
+	}
+</style>

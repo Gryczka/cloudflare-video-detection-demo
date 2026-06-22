@@ -1,0 +1,524 @@
+<section id="demo" class="demo-section container scroll-reveal" aria-labelledby="zone-title">
+	<div class="demo-card corner-card" data-zone-demo>
+		<span class="corner-top-right"></span>
+		<span class="corner-bottom-left"></span>
+
+		<div class="demo-header">
+			<div>
+				<p class="eyebrow">Virtual perimeter analytics</p>
+				<h2 id="zone-title">Draw a zone, log entries</h2>
+			</div>
+			<div class="status-badge" aria-live="polite">
+				<span class="status-dot" aria-hidden="true"></span>
+				<span data-status-text>Idle</span>
+			</div>
+		</div>
+
+		<div class="demo-grid">
+			<div class="video-panel">
+				<div class="video-stage" data-video-stage>
+					<video id="zone-camera-video" muted playsinline></video>
+					<canvas id="zone-overlay-canvas" aria-hidden="true"></canvas>
+					<div class="empty-state" data-empty-state>
+						<div class="camera-icon" aria-hidden="true">
+							<svg viewBox="0 0 24 24"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h7A2.5 2.5 0 0 1 16 6.5V8l3.72-2.13A1.5 1.5 0 0 1 22 7.17v9.66a1.5 1.5 0 0 1-2.28 1.3L16 16v1.5a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 4 17.5v-11Zm2.5-.5A.5.5 0 0 0 6 6.5v11a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5v-11a.5.5 0 0 0-.5-.5h-7Zm9.5 4.3v3.4l4 2.29V8.01l-4 2.29Z"></path></svg>
+						</div>
+						<p>Start the camera, then draw a monitored square over the video.</p>
+						<span>Only person detections inside the zone create events.</span>
+					</div>
+				</div>
+
+				<canvas id="zone-capture-buffer" width="640" height="360" hidden></canvas>
+
+				<div class="controls" aria-label="Zone monitor controls">
+					<button class="control-button primary" type="button" data-start-button>Start camera</button>
+					<button class="control-button ghost" type="button" data-pause-button disabled>Pause stream</button>
+					<button class="control-button outline" type="button" data-draw-button disabled>Draw zone</button>
+					<button class="control-button outline" type="button" data-clear-button disabled>Clear zone</button>
+					<button class="control-button outline" type="button" data-switch-button disabled>Switch camera</button>
+				</div>
+
+				<div class="error-panel" data-error-panel hidden role="alert"></div>
+			</div>
+
+			<aside class="events-panel" aria-labelledby="zone-events-title">
+				<div class="panel-heading">
+					<div>
+						<p class="eyebrow">Event log</p>
+						<h3 id="zone-events-title">Zone activity</h3>
+					</div>
+					<span class="threshold">overlap >= 25%</span>
+				</div>
+				<ul class="event-log" data-event-log aria-live="polite">
+					<li class="placeholder">Draw a zone to begin logging events.</li>
+				</ul>
+			</aside>
+		</div>
+
+		<div class="stats-grid" aria-label="Zone monitor metrics">
+			<div class="stat-card"><span>In zone now</span><strong data-stat-in-zone>0</strong></div>
+			<div class="stat-card"><span>People detected</span><strong data-stat-persons>0</strong></div>
+			<div class="stat-card"><span>Total events</span><strong data-stat-events>0</strong></div>
+			<div class="stat-card"><span>Zone coverage</span><strong data-stat-coverage>-</strong></div>
+			<div class="stat-card"><span>Longest dwell</span><strong data-stat-dwell>-</strong></div>
+			<div class="stat-card"><span>Latency</span><strong data-stat-latency>-</strong></div>
+		</div>
+	</div>
+</section>
+
+<script is:inline>
+	(() => {
+		const root = document.querySelector('[data-zone-demo]');
+		if (!root) return;
+
+		const sampleMs = 1000;
+		const minScore = 0.55;
+		const captureWidth = 640;
+		const captureHeight = 360;
+		const zoneKey = 'workers-ai-zone-monitor:zone';
+		const refs = {
+			video: root.querySelector('#zone-camera-video'),
+			overlay: root.querySelector('#zone-overlay-canvas'),
+			buffer: root.querySelector('#zone-capture-buffer'),
+			stage: root.querySelector('[data-video-stage]'),
+			empty: root.querySelector('[data-empty-state]'),
+			statusText: root.querySelector('[data-status-text]'),
+			startButton: root.querySelector('[data-start-button]'),
+			pauseButton: root.querySelector('[data-pause-button]'),
+			drawButton: root.querySelector('[data-draw-button]'),
+			clearButton: root.querySelector('[data-clear-button]'),
+			switchButton: root.querySelector('[data-switch-button]'),
+			errorPanel: root.querySelector('[data-error-panel]'),
+			eventLog: root.querySelector('[data-event-log]'),
+			inZone: root.querySelector('[data-stat-in-zone]'),
+			persons: root.querySelector('[data-stat-persons]'),
+			events: root.querySelector('[data-stat-events]'),
+			coverage: root.querySelector('[data-stat-coverage]'),
+			dwell: root.querySelector('[data-stat-dwell]'),
+			latency: root.querySelector('[data-stat-latency]'),
+		};
+
+		let stream = null;
+		let intervalId = null;
+		let inFlight = null;
+		let facingMode = 'environment';
+		let drawMode = false;
+		let drawing = false;
+		let drawStart = null;
+		let draftZone = null;
+		let zone = loadZone();
+		let people = [];
+		let previousCount = 0;
+		let lastTransition = 0;
+		let dwellStartedAt = null;
+		let longestDwellMs = 0;
+		let totalEvents = 0;
+		let events = [];
+
+		const overlayContext = refs.overlay.getContext('2d');
+		const bufferContext = refs.buffer.getContext('2d', { willReadFrequently: false });
+
+		function setStatus(text, state) {
+			refs.statusText.textContent = text;
+			root.dataset.status = state;
+		}
+
+		function setError(message) {
+			refs.errorPanel.hidden = false;
+			refs.errorPanel.textContent = message;
+			setStatus('Error', 'error');
+		}
+
+		function clearError() {
+			refs.errorPanel.hidden = true;
+			refs.errorPanel.textContent = '';
+			refs.errorPanel.classList.remove('is-demo-limit');
+		}
+
+		function showDemoLimit(body) {
+			const url = body && body.selfHostUrl;
+			const msg = (body && body.error) || 'Open demo limit reached.';
+			refs.errorPanel.hidden = false;
+			refs.errorPanel.classList.add('is-demo-limit');
+			refs.errorPanel.innerHTML =
+				escapeHtml(msg) +
+				(url ? ` <a href="${escapeHtml(url)}" target="_blank" rel="noopener">Run your own →</a>` : '');
+			setStatus('Demo limit', 'idle');
+		}
+
+		function loadZone() {
+			try {
+				const raw = localStorage.getItem(zoneKey);
+				return raw ? JSON.parse(raw) : null;
+			} catch {
+				return null;
+			}
+		}
+
+		function saveZone() {
+			if (zone) localStorage.setItem(zoneKey, JSON.stringify(zone));
+			else localStorage.removeItem(zoneKey);
+		}
+
+		function sizeCanvases() {
+			const rect = refs.stage.getBoundingClientRect();
+			refs.overlay.width = Math.max(1, Math.round(rect.width));
+			refs.overlay.height = Math.max(1, Math.round(rect.height));
+			refs.buffer.width = captureWidth;
+			refs.buffer.height = captureHeight;
+			renderOverlay();
+		}
+
+		async function startCamera() {
+			clearError();
+			if (!navigator.mediaDevices?.getUserMedia) {
+				setError('This browser does not expose getUserMedia. Try a current desktop or mobile browser.');
+				return;
+			}
+			if (!window.isSecureContext && location.hostname !== 'localhost') {
+				setError('Camera capture requires HTTPS. Deploy to workers.dev or run on localhost.');
+				return;
+			}
+
+			setStatus('Requesting camera', 'pending');
+			refs.startButton.disabled = true;
+			try {
+				stream = await navigator.mediaDevices.getUserMedia({
+					audio: false,
+					video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+				});
+				refs.video.srcObject = stream;
+				await refs.video.play();
+				refs.empty.hidden = true;
+				refs.pauseButton.disabled = false;
+				refs.drawButton.disabled = false;
+				refs.clearButton.disabled = !zone;
+				refs.switchButton.disabled = false;
+				sizeCanvases();
+				setStatus(zone ? 'Monitoring zone' : 'Draw a zone', zone ? 'streaming' : 'idle');
+				startPolling();
+			} catch (error) {
+				refs.startButton.disabled = false;
+				setError(error?.name === 'NotAllowedError' ? 'Camera permission was denied. Allow camera access and try again.' : 'Could not start the camera on this device.');
+			}
+		}
+
+		function stopCamera() {
+			stopPolling();
+			if (stream) for (const track of stream.getTracks()) track.stop();
+			stream = null;
+			refs.video.srcObject = null;
+			people = [];
+			previousCount = 0;
+			dwellStartedAt = null;
+			refs.empty.hidden = false;
+			refs.startButton.disabled = false;
+			refs.pauseButton.disabled = true;
+			refs.drawButton.disabled = true;
+			refs.switchButton.disabled = true;
+			setStatus('Paused', 'idle');
+			renderOverlay();
+		}
+
+		function startPolling() {
+			if (intervalId) return;
+			captureAndDetect();
+			intervalId = window.setInterval(captureAndDetect, sampleMs);
+		}
+
+		function stopPolling() {
+			if (intervalId) window.clearInterval(intervalId);
+			intervalId = null;
+			if (inFlight) inFlight.abort();
+			inFlight = null;
+		}
+
+		async function switchCamera() {
+			facingMode = facingMode === 'environment' ? 'user' : 'environment';
+			stopCamera();
+			await startCamera();
+		}
+
+		async function captureAndDetect() {
+			if (!stream || inFlight || refs.video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+			sizeCanvases();
+			bufferContext.drawImage(refs.video, 0, 0, captureWidth, captureHeight);
+			const blob = await new Promise((resolve) => refs.buffer.toBlob(resolve, 'image/jpeg', 0.7));
+			if (!blob) return;
+
+			const controller = new AbortController();
+			inFlight = controller;
+			const started = performance.now();
+			try {
+				const response = await fetch('/api/detect', {
+					method: 'POST',
+					body: blob,
+					headers: { 'content-type': 'image/jpeg' },
+					signal: controller.signal,
+				});
+				if (!response.ok) {
+					const body = await response.json().catch(() => ({}));
+					if (body && body.demoLimit) {
+						showDemoLimit(body);
+						if (body.reason === 'demo_daily_cap') stopPolling();
+						return;
+					}
+					throw new Error(body.error || 'Detection request failed.');
+				}
+				const payload = await response.json();
+				people = (Array.isArray(payload.detections) ? payload.detections : [])
+					.map(normalizeDetection)
+					.filter(Boolean)
+					.filter((d) => d.label.toLowerCase() === 'person' && d.score >= minScore);
+				const inZone = computeInZone();
+				updateZoneState(inZone.length);
+				refs.latency.textContent = `${Math.round(performance.now() - started)} ms`;
+				refs.persons.textContent = String(people.length);
+				renderOverlay(inZone);
+				if (zone) setStatus(inZone.length > 0 ? 'Zone occupied' : 'Monitoring zone', inZone.length > 0 ? 'occupied' : 'streaming');
+			} catch (error) {
+				if (error?.name !== 'AbortError') {
+					setError(error?.message || 'Detection request failed.');
+					stopPolling();
+				}
+			} finally {
+				if (inFlight === controller) inFlight = null;
+			}
+		}
+
+		function computeInZone() {
+			if (!zone) return [];
+			const zonePx = zoneToPx(zone);
+			return people.filter((person) => overlapArea(person.box, zonePx) / area(person.box) > 0.25);
+		}
+
+		function updateZoneState(currentCount) {
+			refs.inZone.textContent = String(currentCount);
+			refs.coverage.textContent = zone ? `${Math.round(zone.w * zone.h * 100)}%` : '-';
+			const now = Date.now();
+			if (currentCount > 0 && dwellStartedAt) longestDwellMs = Math.max(longestDwellMs, now - dwellStartedAt);
+			refs.dwell.textContent = longestDwellMs ? `${Math.round(longestDwellMs / 1000)}s` : '-';
+
+			if (!zone || currentCount === previousCount || now - lastTransition < 1000) return;
+			let message;
+			if (previousCount === 0 && currentCount > 0) {
+				dwellStartedAt = now;
+				message = currentCount === 1 ? 'Person entered zone' : `${currentCount} people entered zone`;
+			} else if (currentCount > previousCount) {
+				message = `Additional person entered (now ${currentCount})`;
+			} else if (currentCount > 0) {
+				message = `Person left zone (${currentCount} remaining)`;
+			} else {
+				const dwellMs = dwellStartedAt ? now - dwellStartedAt : 0;
+				longestDwellMs = Math.max(longestDwellMs, dwellMs);
+				dwellStartedAt = null;
+				message = `Zone clear${dwellMs ? ` after ${Math.round(dwellMs / 1000)}s` : ''}`;
+			}
+			previousCount = currentCount;
+			lastTransition = now;
+			logEvent(message, currentCount);
+		}
+
+		function logEvent(message, count) {
+			totalEvents += 1;
+			refs.events.textContent = String(totalEvents);
+			events.unshift({ time: new Date(), message, count });
+			events = events.slice(0, 50);
+			renderEvents();
+		}
+
+		function renderEvents() {
+			if (!events.length) {
+				refs.eventLog.innerHTML = '<li class="placeholder">Draw a zone to begin logging events.</li>';
+				return;
+			}
+			refs.eventLog.innerHTML = events.map((event) => `<li><span><strong>${escapeHtml(event.message)}</strong><small>${event.time.toLocaleTimeString()}</small></span><b>${event.count}</b></li>`).join('');
+		}
+
+		function renderOverlay(inZone = computeInZone()) {
+			overlayContext.clearRect(0, 0, refs.overlay.width, refs.overlay.height);
+			const sx = refs.overlay.width / captureWidth;
+			const sy = refs.overlay.height / captureHeight;
+			for (const person of people) {
+				const inside = inZone.includes(person);
+				const x = person.box.xmin * sx;
+				const y = person.box.ymin * sy;
+				const w = (person.box.xmax - person.box.xmin) * sx;
+				const h = (person.box.ymax - person.box.ymin) * sy;
+				overlayContext.strokeStyle = inside ? '#16A34A' : '#FF4801';
+				overlayContext.lineWidth = inside ? 4 : 2;
+				overlayContext.strokeRect(x, y, w, h);
+			}
+			drawZone(draftZone || zone, inZone.length > 0);
+		}
+
+		function drawZone(rect, occupied) {
+			if (!rect) return;
+			const x = rect.x * refs.overlay.width;
+			const y = rect.y * refs.overlay.height;
+			const w = rect.w * refs.overlay.width;
+			const h = rect.h * refs.overlay.height;
+			overlayContext.save();
+			overlayContext.setLineDash([8, 6]);
+			overlayContext.strokeStyle = occupied ? '#16A34A' : '#FF4801';
+			overlayContext.lineWidth = 3;
+			overlayContext.strokeRect(x, y, w, h);
+			overlayContext.fillStyle = occupied ? 'rgba(22, 163, 74, 0.12)' : 'rgba(255, 72, 1, 0.12)';
+			overlayContext.fillRect(x, y, w, h);
+			overlayContext.restore();
+		}
+
+		function enableDrawMode() {
+			drawMode = true;
+			refs.stage.classList.add('drawing-mode');
+			setStatus('Draw zone', 'pending');
+		}
+
+		function clearZone() {
+			zone = null;
+			draftZone = null;
+			previousCount = 0;
+			dwellStartedAt = null;
+			refs.clearButton.disabled = true;
+			saveZone();
+			setStatus(stream ? 'Draw a zone' : 'Idle', 'idle');
+			renderOverlay();
+		}
+
+		function pointerPosition(event) {
+			const rect = refs.overlay.getBoundingClientRect();
+			return { x: clamp((event.clientX - rect.left) / rect.width, 0, 1), y: clamp((event.clientY - rect.top) / rect.height, 0, 1) };
+		}
+
+		refs.overlay.addEventListener('pointerdown', (event) => {
+			if (!drawMode) return;
+			drawing = true;
+			drawStart = pointerPosition(event);
+			draftZone = { ...drawStart, w: 0, h: 0 };
+			refs.overlay.setPointerCapture(event.pointerId);
+		});
+
+		refs.overlay.addEventListener('pointermove', (event) => {
+			if (!drawing || !drawStart) return;
+			const current = pointerPosition(event);
+			draftZone = normalizeRect(drawStart, current);
+			renderOverlay();
+		});
+
+		refs.overlay.addEventListener('pointerup', (event) => {
+			if (!drawing) return;
+			drawing = false;
+			drawMode = false;
+			refs.stage.classList.remove('drawing-mode');
+			if (draftZone && draftZone.w > 0.03 && draftZone.h > 0.03) {
+				zone = draftZone;
+				refs.clearButton.disabled = false;
+				saveZone();
+				logEvent('Zone configured', computeInZone().length);
+				setStatus(stream ? 'Monitoring zone' : 'Idle', stream ? 'streaming' : 'idle');
+			}
+			draftZone = null;
+			renderOverlay();
+			refs.overlay.releasePointerCapture(event.pointerId);
+		});
+
+		function normalizeDetection(raw) {
+			if (!raw || typeof raw !== 'object') return null;
+			const label = String(raw.label || raw.class || raw.name || 'object');
+			const score = Number(raw.score ?? raw.confidence ?? raw.probability ?? 0);
+			const box = raw.box || raw.bbox || raw.bounding_box || raw;
+			let xmin = Number(box.xmin ?? box.x_min ?? box.left ?? box.x ?? 0);
+			let ymin = Number(box.ymin ?? box.y_min ?? box.top ?? box.y ?? 0);
+			let xmax = Number(box.xmax ?? box.x_max ?? box.right ?? 0);
+			let ymax = Number(box.ymax ?? box.y_max ?? box.bottom ?? 0);
+			if (![xmin, ymin, xmax, ymax, score].every(Number.isFinite)) return null;
+			if (Math.max(xmin, ymin, xmax, ymax) <= 1.5) {
+				xmin *= captureWidth; xmax *= captureWidth; ymin *= captureHeight; ymax *= captureHeight;
+			}
+			return { label, score, box: { xmin: clamp(xmin, 0, captureWidth), ymin: clamp(ymin, 0, captureHeight), xmax: clamp(xmax, 0, captureWidth), ymax: clamp(ymax, 0, captureHeight) } };
+		}
+
+		function zoneToPx(rect) {
+			return { xmin: rect.x * captureWidth, ymin: rect.y * captureHeight, xmax: (rect.x + rect.w) * captureWidth, ymax: (rect.y + rect.h) * captureHeight };
+		}
+
+		function normalizeRect(a, b) {
+			const x = Math.min(a.x, b.x);
+			const y = Math.min(a.y, b.y);
+			return { x, y, w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) };
+		}
+
+		function area(rect) { return Math.max(1, (rect.xmax - rect.xmin) * (rect.ymax - rect.ymin)); }
+		function overlapArea(a, b) { return Math.max(0, Math.min(a.xmax, b.xmax) - Math.max(a.xmin, b.xmin)) * Math.max(0, Math.min(a.ymax, b.ymax) - Math.max(a.ymin, b.ymin)); }
+		function clamp(value, min, max) { return Math.min(Math.max(value, min), max); }
+		function escapeHtml(value) { return String(value).replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char]); }
+
+		const resizeObserver = new ResizeObserver(sizeCanvases);
+		resizeObserver.observe(refs.stage);
+		refs.startButton.addEventListener('click', startCamera);
+		refs.pauseButton.addEventListener('click', stopCamera);
+		refs.drawButton.addEventListener('click', enableDrawMode);
+		refs.clearButton.addEventListener('click', clearZone);
+		refs.switchButton.addEventListener('click', switchCamera);
+		document.addEventListener('visibilitychange', () => { if (document.hidden) stopPolling(); else if (stream) startPolling(); });
+		window.addEventListener('beforeunload', stopCamera);
+		renderEvents();
+		renderOverlay();
+		refs.clearButton.disabled = !zone;
+	})();
+</script>
+
+<style>
+	.demo-section { padding-block: 28px 42px; }
+	.demo-card { padding: 18px; background: var(--cf-bg-200); border: 1px solid var(--cf-border); border-radius: var(--radius-xl); box-shadow: var(--shadow-stack); animation: fade-slide-up 650ms var(--ease-entrance) 120ms both; }
+	.demo-header, .demo-grid, .stats-grid { position: relative; z-index: 1; }
+	.demo-header { display: flex; flex-direction: column; gap: 16px; padding: 6px 6px 18px; border-bottom: 1px solid var(--cf-border-light); }
+	.eyebrow { margin: 0 0 6px; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.05em; color: var(--cf-orange); text-transform: uppercase; }
+	h2, h3 { margin: 0; font-weight: 500; letter-spacing: -0.035em; }
+	h2 { font-size: clamp(1.75rem, 4vw, 2.5rem); line-height: 1; }
+	h3 { font-size: 20px; }
+	.status-badge { display: inline-flex; align-items: center; align-self: flex-start; gap: 8px; padding: 8px 12px; font-family: var(--font-mono); font-size: 12px; color: var(--cf-text); background: var(--cf-bg-300); border: 1px solid var(--cf-border); border-radius: var(--radius-full); }
+	.status-dot { width: 8px; height: 8px; background: var(--cf-text-subtle); border-radius: 999px; }
+	.demo-card[data-status='pending'] .status-dot { background: var(--cf-warning); animation: pulse-soft 1s ease-in-out infinite; }
+	.demo-card[data-status='streaming'] .status-dot { background: var(--cf-success); }
+	.demo-card[data-status='occupied'] .status-dot { background: var(--cf-orange); animation: pulse-soft 1s ease-in-out infinite; }
+	.demo-card[data-status='error'] .status-dot { background: var(--cf-error); }
+	.demo-grid { display: grid; grid-template-columns: 1fr; gap: 18px; padding-block: 20px; }
+	.video-panel { display: flex; min-width: 0; flex-direction: column; gap: 14px; }
+	.video-stage { position: relative; min-height: 260px; aspect-ratio: 16 / 9; overflow: hidden; background: linear-gradient(135deg, rgba(82, 16, 0, 0.08), transparent), #1a1209; border: 1px solid var(--cf-border); border-radius: var(--radius-xl); }
+	.video-stage.drawing-mode { cursor: crosshair; }
+	#zone-camera-video, #zone-overlay-canvas, .empty-state { position: absolute; inset: 0; width: 100%; height: 100%; }
+	#zone-camera-video { object-fit: fill; }
+	#zone-overlay-canvas { touch-action: none; }
+	.empty-state { display: grid; place-items: center; padding: 24px; color: #fffbf5; text-align: center; background-image: radial-gradient(circle, rgba(255, 251, 245, 0.16) 0.75px, transparent 0.75px); background-size: 12px 12px; }
+	.empty-state[hidden] { display: none; }
+	.empty-state p { max-width: 420px; margin: 14px 0 6px; font-size: clamp(1.1rem, 3vw, 1.6rem); line-height: 1.1; letter-spacing: -0.035em; }
+	.empty-state span { max-width: 400px; font-size: 14px; line-height: 1.5; color: rgba(255, 251, 245, 0.7); }
+	.camera-icon { display: grid; width: 58px; height: 58px; place-items: center; color: var(--cf-orange); background: rgba(255, 72, 1, 0.12); border: 1px solid rgba(255, 72, 1, 0.32); border-radius: var(--radius-xl); }
+	.camera-icon svg { width: 28px; height: 28px; fill: currentColor; }
+	.controls { display: flex; flex-wrap: wrap; gap: 10px; }
+	.control-button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 11px 18px; font-size: 14px; font-weight: 500; border: 1px solid transparent; border-radius: var(--radius-full); }
+	.control-button.primary { color: var(--cf-bg-100); background: var(--cf-orange); }
+	.control-button.primary:hover { opacity: 0.95; border-color: color-mix(in srgb, var(--cf-bg-100) 50%, transparent); border-style: dashed; }
+	.control-button.ghost { color: var(--cf-orange); background: transparent; border-color: var(--cf-border); }
+	.control-button.outline { color: var(--cf-text); background: var(--cf-bg-200); border-color: var(--cf-border); }
+	.control-button.ghost:hover, .control-button.outline:hover { background: var(--cf-bg-300); border-color: var(--cf-orange); border-style: dashed; }
+	.error-panel { padding: 12px 14px; font-size: 14px; line-height: 1.45; color: var(--cf-error); background: color-mix(in srgb, var(--cf-error) 9%, var(--cf-bg-200)); border: 1px solid color-mix(in srgb, var(--cf-error) 36%, transparent); border-radius: var(--radius-lg); }
+	.error-panel.is-demo-limit { color: var(--cf-text); background: var(--cf-orange-light); border-color: color-mix(in srgb, var(--cf-orange) 36%, transparent); }
+	.error-panel.is-demo-limit a { color: var(--cf-orange); font-weight: 600; }
+	.events-panel { min-width: 0; padding: 18px; background: var(--cf-bg-100); border: 1px dashed var(--cf-border); border-radius: var(--radius-xl); }
+	.panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding-bottom: 16px; border-bottom: 1px solid var(--cf-border-light); }
+	.threshold { flex: 0 0 auto; padding: 5px 8px; font-family: var(--font-mono); font-size: 11px; color: var(--cf-orange); background: var(--cf-orange-light); border-radius: var(--radius-full); }
+	.event-log { display: flex; flex-direction: column; gap: 8px; min-height: 210px; max-height: 420px; overflow: auto; margin: 16px 0 0; padding: 0; list-style: none; }
+	:global(.event-log li) { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; font-size: 14px; background: var(--cf-bg-200); border: 1px solid var(--cf-border-light); border-radius: var(--radius-lg); }
+	:global(.event-log .placeholder) { justify-content: center; min-height: 128px; color: var(--cf-text-muted); text-align: center; background: transparent; border-style: dashed; }
+	:global(.event-log strong) { display: block; font-weight: 500; }
+	:global(.event-log small) { display: block; margin-top: 3px; font-family: var(--font-mono); color: var(--cf-text-muted); }
+	:global(.event-log b) { font-family: var(--font-mono); color: var(--cf-orange); }
+	.stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; padding-top: 18px; border-top: 1px solid var(--cf-border-light); }
+	.stat-card { padding: 14px; background: var(--cf-bg-100); border: 1px solid var(--cf-border); border-radius: var(--radius-lg); }
+	.stat-card span { display: block; margin-bottom: 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.05em; color: var(--cf-text-muted); text-transform: uppercase; }
+	.stat-card strong { display: block; font-size: 24px; font-weight: 500; line-height: 1; color: var(--cf-orange); letter-spacing: -0.035em; }
+	@media (min-width: 720px) { .demo-card { padding: 24px; } .demo-header { flex-direction: row; align-items: center; justify-content: space-between; } .status-badge { align-self: center; } .stats-grid { grid-template-columns: repeat(3, 1fr); } }
+	@media (min-width: 1024px) { .demo-grid { grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.45fr); gap: 22px; } .stats-grid { grid-template-columns: repeat(6, 1fr); } }
+</style>

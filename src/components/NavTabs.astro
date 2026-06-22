@@ -1,0 +1,68 @@
+---
+const pathname = Astro.url.pathname.replace(/\/$/, '') || '/';
+
+const tabs = [
+	{ href: '/', label: 'Live' },
+	{ href: '/zone', label: 'Zone' },
+	{ href: '/ppe', label: 'PPE' },
+	{ href: '/architecture', label: 'Architecture' },
+];
+---
+
+<nav class="nav-tabs" aria-label="Demo views">
+	{tabs.map((tab) => {
+		const active = pathname === tab.href;
+		return (
+			<a href={tab.href} class:list={[{ active }]} aria-current={active ? 'page' : undefined}>
+				{tab.label}
+			</a>
+		);
+	})}
+</nav>
+
+<style>
+	.nav-tabs {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 4px;
+		background: var(--cf-bg-200);
+		border: 1px solid var(--cf-border);
+		border-radius: var(--radius-full);
+	}
+
+	a {
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 34px;
+		padding: 8px 14px;
+		font-size: 13px;
+		line-height: 1;
+		color: var(--cf-text-muted);
+		text-decoration: none;
+		border-radius: var(--radius-full);
+	}
+
+	a:hover {
+		color: var(--cf-text);
+		background: var(--cf-bg-300);
+	}
+
+	a.active {
+		color: var(--cf-bg-100);
+		background: var(--cf-orange);
+	}
+
+	@media (max-width: 719px) {
+		.nav-tabs {
+			width: 100%;
+			justify-content: space-between;
+		}
+
+		a {
+			flex: 1;
+		}
+	}
+</style>

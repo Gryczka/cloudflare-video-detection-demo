@@ -1,0 +1,45 @@
+---
+import DemoNotice from '../components/DemoNotice.astro';
+import Footer from '../components/Footer.astro';
+import Header from '../components/Header.astro';
+import Hero from '../components/Hero.astro';
+import HowItWorks from '../components/HowItWorks.astro';
+import PPEMonitorDemo from '../components/PPEMonitorDemo.astro';
+import Layout from '../layouts/Layout.astro';
+
+const steps = [
+	{
+		accent: 'compute',
+		title: 'Track people fast',
+		body: 'DETR keeps the person boxes responsive while the larger vision model works on a slower cadence.',
+	},
+	{
+		accent: 'ai',
+		title: 'Assess PPE',
+		body: 'Choose Llama Vision, LLaVA, or Gemma 4 to reason about hardhats or baseball caps from the sampled frame.',
+	},
+	{
+		accent: 'sase',
+		title: 'Flag violations',
+		body: 'The browser logs transitions when the frame changes from compliant to missing the selected headwear or back again.',
+	},
+] as const;
+---
+
+<Layout>
+	<Header />
+	<main>
+		<DemoNotice />
+		<Hero
+			kicker="PPE compliance powered by multimodal Workers AI"
+			title="Detect people missing selected headwear"
+			subtitle="Pair real-time person boxes from DETR with a selectable vision model that can check for either hardhats or baseball caps."
+			model="DETR + Llama Vision / LLaVA / Gemma 4"
+			meta="on-demand vision checks"
+			cta={{ label: 'Run the PPE check', href: '#demo' }}
+		/>
+		<PPEMonitorDemo />
+		<HowItWorks title="Fast boxes, slower reasoning" subtitle="This view combines a fast detector with a slower vision-language model so the UI stays responsive while PPE checks complete." steps={steps} />
+	</main>
+	<Footer />
+</Layout>

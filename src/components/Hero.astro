@@ -1,0 +1,155 @@
+---
+interface Props {
+	kicker?: string;
+	title?: string;
+	subtitle?: string;
+	model?: string;
+	meta?: string;
+	cta?: {
+		label: string;
+		href: string;
+	};
+}
+
+const {
+	kicker = 'Live object detection on Cloudflare Workers',
+	title = 'See the world through Workers AI',
+	subtitle = 'Stream camera frames from this device to Cloudflare, run DETR object detection on Workers AI, and render bounding boxes back over the live video feed.',
+	model = '@cf/facebook/detr-resnet-50',
+	meta = '$0.0000075 per inference',
+	cta,
+} = Astro.props;
+---
+
+<section class="hero container">
+	<div class="hero-kicker">{kicker}</div>
+	<h1>{title}</h1>
+	<p>{subtitle}</p>
+	<div class="model-pill">
+		<span>{model}</span>
+		<span>{meta}</span>
+	</div>
+	{cta && (
+		<a class="hero-cta" href={cta.href}>
+			{cta.label}
+			<svg viewBox="0 0 20 20" aria-hidden="true">
+				<path d="M10 14.5 4.75 9.25l1.06-1.06L9.25 11.63V4h1.5v7.63l3.44-3.44 1.06 1.06L10 14.5Z"></path>
+			</svg>
+		</a>
+	)}
+</section>
+
+<style>
+	.hero {
+		padding-block: 48px 28px;
+		text-align: center;
+		animation: fade-slide-up 500ms var(--ease-entrance) both;
+	}
+
+	.hero-kicker {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		margin-bottom: 16px;
+		padding: 7px 12px;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		letter-spacing: 0.03em;
+		color: var(--cf-orange);
+		background: var(--cf-orange-light);
+		border: 1px solid color-mix(in srgb, var(--cf-orange) 28%, transparent);
+		border-radius: var(--radius-full);
+	}
+
+	h1 {
+		max-width: 980px;
+		margin: 0 auto;
+		font-size: clamp(2.45rem, 7vw, 5rem);
+		font-weight: 500;
+		line-height: 0.95;
+		letter-spacing: -0.045em;
+		text-wrap: balance;
+	}
+
+	p {
+		max-width: 760px;
+		margin: 20px auto 0;
+		font-size: clamp(1rem, 2vw, 1.25rem);
+		line-height: 1.45;
+		color: var(--cf-text-muted);
+		text-wrap: balance;
+	}
+
+	.model-pill {
+		display: inline-flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		margin-top: 22px;
+		padding: 8px;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--cf-text);
+		background: var(--cf-bg-200);
+		border: 1px solid var(--cf-border);
+		border-radius: var(--radius-full);
+		box-shadow: var(--shadow-card);
+	}
+
+	.model-pill span {
+		padding: 5px 10px;
+		border-radius: var(--radius-full);
+	}
+
+	.model-pill span:first-child {
+		color: var(--cf-bg-100);
+		background: var(--cf-orange);
+	}
+
+	.hero-cta {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		margin-top: 18px;
+		padding: 10px 16px;
+		font-size: 14px;
+		font-weight: 500;
+		color: var(--cf-orange);
+		text-decoration: none;
+		background: transparent;
+		border: 1px solid var(--cf-border);
+		border-radius: var(--radius-full);
+	}
+
+	.hero-cta:hover {
+		color: var(--cf-text);
+		background: var(--cf-bg-300);
+		border-color: var(--cf-orange);
+		border-style: dashed;
+	}
+
+	.hero-cta svg {
+		width: 18px;
+		height: 18px;
+		fill: currentColor;
+		animation: cta-bob 1.8s ease-in-out infinite;
+	}
+
+	@keyframes cta-bob {
+		0%,
+		100% {
+			transform: translateY(0);
+		}
+		50% {
+			transform: translateY(3px);
+		}
+	}
+
+	@media (min-width: 768px) {
+		.hero {
+			padding-block: 72px 42px;
+		}
+	}
+</style>
